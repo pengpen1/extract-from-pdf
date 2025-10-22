@@ -15,10 +15,17 @@ from pathlib import Path
 class ResumeInfo:
     """简历信息数据类"""
 
+    index: int  # 序号
+    name: str  # 姓名
+    gender: str  # 性别
+    age: str  # 年龄
+    date: str  # 时间
+    phone: str  # 电话
+    position: str  # 岗位
+    location: str  # 地区
+    salary: str  # 工资
+    email: str  # 邮箱
     filename: str  # 文件名
-    name: str  # 姓名（未找到时为"未识别"）
-    phone: str  # 手机号（未找到时为"未找到"）
-    email: str  # 邮箱（未找到时为"未找到"）
 
 
 @dataclass
@@ -407,6 +414,250 @@ class InfoExtractor:
 
         return True
 
+    def extract_gender(self, text: str) -> Optional[str]:
+        """提取性别
+
+        搜索"性别："、"性 别："等关键词后的内容
+
+        Args:
+            text: 简历文本
+
+        Returns:
+            性别字符串（男/女），未找到时返回None
+        """
+        if not text:
+            return None
+
+        # 定义关键词模式列表
+        patterns = [
+            r"性\s*别\s*[：:]\s*(男|女)",
+            r"Gender\s*[：:]\s*(男|女|Male|Female|male|female)",
+        ]
+
+        for pattern in patterns:
+            match = self.re.search(pattern, text, self.re.IGNORECASE)
+            if match:
+                gender = match.group(1).strip()
+                # 统一转换为中文
+                if gender.lower() in ["male", "男"]:
+                    return "男"
+                elif gender.lower() in ["female", "女"]:
+                    return "女"
+
+        return None
+
+    def extract_age(self, text: str) -> Optional[str]:
+        """提取年龄
+
+        搜索"年龄："、"Age:"等关键词后的数字，或者"XX岁"格式
+
+        Args:
+            text: 简历文本
+
+        Returns:
+            年龄字符串，未找到时返回None
+        """
+        if not text:
+            return None
+
+        # 定义关键词模式列表
+        patterns = [
+            r"年\s*龄\s*[：:]\s*(\d{1,2})",
+            r"Age\s*[：:]\s*(\d{1,2})",
+            r"(\d{2})岁",  # 匹配"26岁"这种格式
+        ]
+
+        for pattern in patterns:
+            match = self.re.search(pattern, text, self.re.IGNORECASE)
+            if match:
+                age = match.group(1).strip()
+                # 验证年龄范围合理性（18-70岁）
+                if age.isdigit() and 18 <= int(age) <= 70:
+                    return age
+
+        return None
+
+    def extract_date(self, text: str) -> Optional[str]:
+        """提取日期/时间
+
+        搜索简历中的日期信息（如更新时间、出生日期等）
+
+        Args:
+            text: 简历文本
+
+        Returns:
+            日期字符串，未找到时返回None
+        """
+        if not text:
+            return None
+
+        # 定义日期模式列表
+        patterns = [
+            r"更新时间\s*[：:]\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)",
+            r"出生日期\s*[：:]\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)",
+            r"(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)",
+        ]
+
+        for pattern in patterns:
+            match = self.re.search(pattern, text)
+            if match:
+                return match.group(1).strip()
+
+        return None
+
+    def extract_position(self, text: str) -> Optional[str]:
+        """提取应聘岗位
+
+        搜索"应聘岗位："、"期望职位："等关键词后的内容
+        如果内容包含城市名，只提取岗位部分
+
+        Args:
+            text: 简历文本
+
+        Returns:
+            岗位字符串，未找到时返回None
+        """
+        if not text:
+            return None
+
+        # 定义关键词模式列表
+        patterns = [
+            r"应聘岗位\s*[：:]\s*([^\n]+)",
+            r"期望职位\s*[：:]\s*([^\n]+)",
+            r"求职意向\s*[：:]\s*([^\n]+)",
+            r"目标职位\s*[：:]\s*([^\n]+)",
+            r"Position\s*[：:]\s*([^\n]+)",
+        ]
+
+        for pattern in patterns:
+            match = self.re.search(pattern, text, self.re.IGNORECASE)
+            if match:
+                full_text = match.group(1).strip()
+                
+                # 如果包含常见分隔符（空格、|、/等），尝试分离岗位和地区
+                # 例如："Java 成都" 或 "Java | 成都"
+                separators = [r"\s+", r"\|", r"/", r"·"]
+                
+                for sep in separators:
+                    parts = self.re.split(sep, full_text)
+                    if len(parts) >= 2:
+                        # 取第一部分作为岗位
+                        position = parts[0].strip()
+                        # 验证岗位不是城市名
+                        if position and not self._is_city_name(position):
+                            return position
+                
+                # 如果没有分隔符，返回整个文本（但要验证长度合理）
+                if len(full_text) <= 15:
+                    return full_text
+
+        return None
+
+    def extract_location(self, text: str) -> Optional[str]:
+        """提取地区/城市
+
+        搜索"工作地点："、"期望城市："等关键词后的内容
+        或从"求职意向"中提取城市部分
+
+        Args:
+            text: 简历文本
+
+        Returns:
+            地区字符串，未找到时返回None
+        """
+        if not text:
+            return None
+
+        # 定义关键词模式列表
+        patterns = [
+            r"工作地点\s*[：:]\s*([^\n]{2,20})",
+            r"期望城市\s*[：:]\s*([^\n]{2,20})",
+            r"期望地点\s*[：:]\s*([^\n]{2,20})",
+            r"所在地\s*[：:]\s*([^\n]{2,20})",
+            r"Location\s*[：:]\s*([^\n]{2,20})",
+        ]
+
+        for pattern in patterns:
+            match = self.re.search(pattern, text, self.re.IGNORECASE)
+            if match:
+                location = match.group(1).strip()
+                # 清理可能的多余空白和换行
+                location = self.re.sub(r"\s+", " ", location)
+                return location
+
+        # 如果没有找到，尝试从"求职意向"中提取城市
+        intention_pattern = r"求职意向\s*[：:]\s*([^\n]+)"
+        match = self.re.search(intention_pattern, text)
+        if match:
+            full_text = match.group(1).strip()
+            
+            # 尝试分离岗位和地区
+            separators = [r"\s+", r"\|", r"/", r"·"]
+            
+            for sep in separators:
+                parts = self.re.split(sep, full_text)
+                if len(parts) >= 2:
+                    # 取第二部分作为地区
+                    location = parts[1].strip()
+                    # 验证是否为城市名
+                    if location and self._is_city_name(location):
+                        return location
+
+        return None
+
+    def _is_city_name(self, text: str) -> bool:
+        """判断文本是否为城市名
+
+        Args:
+            text: 待判断的文本
+
+        Returns:
+            True表示是城市名，False表示不是
+        """
+        # 常见城市名列表（可以根据需要扩展）
+        cities = {
+            "北京", "上海", "广州", "深圳", "成都", "重庆", "杭州", "武汉",
+            "西安", "天津", "南京", "苏州", "长沙", "郑州", "沈阳", "青岛",
+            "宁波", "东莞", "无锡", "佛山", "合肥", "昆明", "福州", "厦门",
+            "哈尔滨", "济南", "温州", "长春", "石家庄", "常州", "泉州", "南宁",
+            "贵阳", "南昌", "南通", "金华", "徐州", "太原", "嘉兴", "烟台",
+            "惠州", "保定", "台州", "中山", "绍兴", "乌鲁木齐", "潍坊", "兰州",
+        }
+        
+        return text in cities
+
+    def extract_salary(self, text: str) -> Optional[str]:
+        """提取期望薪资
+
+        搜索"期望薪资："、"薪资要求："等关键词后的内容
+
+        Args:
+            text: 简历文本
+
+        Returns:
+            薪资字符串，未找到时返回None
+        """
+        if not text:
+            return None
+
+        # 定义关键词模式列表
+        patterns = [
+            r"期望薪资\s*[：:]\s*([^\n]{2,30})",
+            r"薪资要求\s*[：:]\s*([^\n]{2,30})",
+            r"期望工资\s*[：:]\s*([^\n]{2,30})",
+            r"Salary\s*[：:]\s*([^\n]{2,30})",
+        ]
+
+        for pattern in patterns:
+            match = self.re.search(pattern, text, self.re.IGNORECASE)
+            if match:
+                salary = match.group(1).strip()
+                # 清理可能的多余空白和换行
+                salary = self.re.sub(r"\s+", " ", salary)
+                return salary
+
+        return None
+
 
 # ==================== 主程序入口 ====================
 
@@ -444,12 +695,25 @@ if __name__ == "__main__":
 
                 # 提取信息
                 name = info_extractor.extract_name(text)
+                gender = info_extractor.extract_gender(text)
+                age = info_extractor.extract_age(text)
+                date = info_extractor.extract_date(text)
                 phone = info_extractor.extract_phone(text)
+                position = info_extractor.extract_position(text)
+                location = info_extractor.extract_location(text)
+                salary = info_extractor.extract_salary(text)
                 email = info_extractor.extract_email(text)
 
-                print(f"  姓名: {name if name else '未识别'}")
-                print(f"  手机号: {phone if phone else '未找到'}")
-                print(f"  邮箱: {email if email else '未找到'}")
+                print(f"  姓名: {name if name else ''}")
+                print(f"  性别: {gender if gender else ''}")
+                print(f"  年龄: {age if age else ''}")
+                print(f"  时间: {date if date else ''}")
+                print(f"  电话: {phone if phone else ''}")
+                print(f"  岗位: {position if position else ''}")
+                print(f"  地区: {location if location else ''}")
+                print(f"  工资: {salary if salary else ''}")
+                print(f"  邮箱: {email if email else ''}")
+                print(f"  文件名: {test_file.name}")
 
             except PDFExtractionError as e:
                 print(f"✗ 提取失败: {e}")
