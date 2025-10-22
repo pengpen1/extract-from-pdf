@@ -533,11 +533,11 @@ class InfoExtractor:
             match = self.re.search(pattern, text, self.re.IGNORECASE)
             if match:
                 full_text = match.group(1).strip()
-                
+
                 # 如果包含常见分隔符（空格、|、/等），尝试分离岗位和地区
                 # 例如："Java 成都" 或 "Java | 成都"
                 separators = [r"\s+", r"\|", r"/", r"·"]
-                
+
                 for sep in separators:
                     parts = self.re.split(sep, full_text)
                     if len(parts) >= 2:
@@ -546,7 +546,7 @@ class InfoExtractor:
                         # 验证岗位不是城市名
                         if position and not self._is_city_name(position):
                             return position
-                
+
                 # 如果没有分隔符，返回整个文本（但要验证长度合理）
                 if len(full_text) <= 15:
                     return full_text
@@ -590,10 +590,10 @@ class InfoExtractor:
         match = self.re.search(intention_pattern, text)
         if match:
             full_text = match.group(1).strip()
-            
+
             # 尝试分离岗位和地区
             separators = [r"\s+", r"\|", r"/", r"·"]
-            
+
             for sep in separators:
                 parts = self.re.split(sep, full_text)
                 if len(parts) >= 2:
@@ -616,14 +616,56 @@ class InfoExtractor:
         """
         # 常见城市名列表（可以根据需要扩展）
         cities = {
-            "北京", "上海", "广州", "深圳", "成都", "重庆", "杭州", "武汉",
-            "西安", "天津", "南京", "苏州", "长沙", "郑州", "沈阳", "青岛",
-            "宁波", "东莞", "无锡", "佛山", "合肥", "昆明", "福州", "厦门",
-            "哈尔滨", "济南", "温州", "长春", "石家庄", "常州", "泉州", "南宁",
-            "贵阳", "南昌", "南通", "金华", "徐州", "太原", "嘉兴", "烟台",
-            "惠州", "保定", "台州", "中山", "绍兴", "乌鲁木齐", "潍坊", "兰州",
+            "北京",
+            "上海",
+            "广州",
+            "深圳",
+            "成都",
+            "重庆",
+            "杭州",
+            "武汉",
+            "西安",
+            "天津",
+            "南京",
+            "苏州",
+            "长沙",
+            "郑州",
+            "沈阳",
+            "青岛",
+            "宁波",
+            "东莞",
+            "无锡",
+            "佛山",
+            "合肥",
+            "昆明",
+            "福州",
+            "厦门",
+            "哈尔滨",
+            "济南",
+            "温州",
+            "长春",
+            "石家庄",
+            "常州",
+            "泉州",
+            "南宁",
+            "贵阳",
+            "南昌",
+            "南通",
+            "金华",
+            "徐州",
+            "太原",
+            "嘉兴",
+            "烟台",
+            "惠州",
+            "保定",
+            "台州",
+            "中山",
+            "绍兴",
+            "乌鲁木齐",
+            "潍坊",
+            "兰州",
         }
-        
+
         return text in cities
 
     def extract_salary(self, text: str) -> Optional[str]:
@@ -659,61 +701,313 @@ class InfoExtractor:
         return None
 
 
-# ==================== 主程序入口 ====================
+# ==================== Excel导出模块 ====================
 
-if __name__ == "__main__":
-    print("简历信息提取工具 - 测试模块")
-    print("=" * 50)
 
-    # 测试FileScanner
-    scanner = FileScanner("datas")
-    pdf_files = scanner.scan_pdf_files()
+class ExcelExporter:
+    """Excel导出器，负责将提取结果导出为Excel文件"""
 
-    print(f"\n找到 {len(pdf_files)} 个PDF文件:")
-    for pdf_file in pdf_files:
-        print(f"  - {pdf_file}")
+    def __init__(self, output_dir: Path = None):
+        """初始化Excel导出器
 
-    if len(pdf_files) == 0:
-        print("\n提示: 请将PDF文件放入 'datas' 文件夹中进行测试")
-    else:
-        # 测试PDFExtractor和InfoExtractor
-        print("\n" + "=" * 50)
-        print("测试PDF文本提取和信息提取模块")
-        print("=" * 50)
+        Args:
+            output_dir: 输出目录路径，默认为当前目录
+        """
+        if output_dir is None:
+            # 默认输出到当前目录
+            self.output_dir = Path.cwd()
+        else:
+            self.output_dir = Path(output_dir)
 
-        pdf_extractor = PDFExtractor()
-        info_extractor = InfoExtractor()
+        # 确保输出目录存在
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 测试所有PDF文件
-        for i, test_file in enumerate(pdf_files, 1):
-            print(f"\n[{i}/{len(pdf_files)}] 正在处理: {test_file.name}")
+    def export(self, data: List[ResumeInfo]) -> Path:
+        """导出数据到Excel文件
+
+        Args:
+            data: 简历信息列表
+
+        Returns:
+            生成的Excel文件路径
+
+        Raises:
+            ExcelExportError: 导出失败时抛出
+        """
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, Alignment
+            from datetime import datetime
+
+            # 创建工作簿
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "简历信息"
+
+            # 定义表头
+            headers = [
+                "序号",
+                "姓名",
+                "性别",
+                "年龄",
+                "时间",
+                "电话",
+                "岗位",
+                "地区",
+                "工资",
+                "邮箱",
+                "文件名",
+            ]
+
+            # 写入表头
+            for col_idx, header in enumerate(headers, start=1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                # 设置表头样式：粗体、居中
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            # 写入数据行
+            for row_idx, resume_info in enumerate(data, start=2):
+                ws.cell(row=row_idx, column=1, value=resume_info.index)
+                ws.cell(row=row_idx, column=2, value=resume_info.name)
+                ws.cell(row=row_idx, column=3, value=resume_info.gender)
+                ws.cell(row=row_idx, column=4, value=resume_info.age)
+                ws.cell(row=row_idx, column=5, value=resume_info.date)
+                ws.cell(row=row_idx, column=6, value=resume_info.phone)
+                ws.cell(row=row_idx, column=7, value=resume_info.position)
+                ws.cell(row=row_idx, column=8, value=resume_info.location)
+                ws.cell(row=row_idx, column=9, value=resume_info.salary)
+                ws.cell(row=row_idx, column=10, value=resume_info.email)
+                ws.cell(row=row_idx, column=11, value=resume_info.filename)
+
+            # 自动调整列宽
+            self._adjust_column_width(ws)
+
+            # 生成时间戳文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"简历提取结果_{timestamp}.xlsx"
+            output_path = self.output_dir / filename
+
+            # 保存Excel文件
+            wb.save(output_path)
+
+            return output_path
+
+        except ImportError as e:
+            raise ExcelExportError(f"缺少openpyxl库: {str(e)}")
+        except Exception as e:
+            raise ExcelExportError(f"Excel导出失败: {str(e)}")
+
+    def _adjust_column_width(self, worksheet):
+        """自动调整列宽
+
+        根据单元格内容自动调整每列的宽度，使内容完整显示
+
+        Args:
+            worksheet: openpyxl工作表对象
+        """
+        for column in worksheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter  # 获取列字母（A, B, C...）
+
+            for cell in column:
+                try:
+                    # 计算单元格内容长度
+                    if cell.value:
+                        # 中文字符按2个字符计算，英文按1个字符计算
+                        cell_value = str(cell.value)
+                        # 简单估算：中文字符占用更多空间
+                        length = sum(
+                            2 if "\u4e00" <= char <= "\u9fff" else 1
+                            for char in cell_value
+                        )
+                        max_length = max(max_length, length)
+                except:
+                    pass
+
+            # 设置列宽（加上一些边距）
+            adjusted_width = min(max_length + 2, 50)  # 最大宽度限制为50
+            worksheet.column_dimensions[column_letter].width = adjusted_width
+
+
+# ==================== 主控制器 ====================
+
+
+class ResumeExtractorApp:
+    """简历信息提取应用主控制器，负责协调各组件并控制整体流程"""
+
+    def __init__(self, data_folder: str = "datas"):
+        """初始化应用
+
+        Args:
+            data_folder: 数据文件夹名称，默认为"datas"
+        """
+        self.data_folder = data_folder
+        self.file_scanner = FileScanner(data_folder)
+        self.pdf_extractor = PDFExtractor()
+        self.info_extractor = InfoExtractor()
+        self.excel_exporter = ExcelExporter()
+
+    def run(self):
+        """运行主流程
+
+        流程步骤：
+        1. 显示启动欢迎界面
+        2. 扫描PDF文件
+        3. 检查是否有文件需要处理
+        4. 逐个处理文件（显示进度）
+        5. 收集提取结果
+        6. 导出Excel
+        7. 显示统计信息
+        8. 等待用户按键退出
+        """
+        # 步骤1: 显示启动欢迎界面
+        self._show_welcome()
+
+        # 步骤2: 扫描PDF文件
+        print("\n正在扫描文件...")
+        pdf_files = self.file_scanner.scan_pdf_files()
+
+        # 步骤3: 检查是否有文件需要处理
+        if len(pdf_files) == 0:
+            print(f"\n未在 '{self.data_folder}' 文件夹中找到PDF文件。")
+            print(f"请将PDF简历文件放入 '{self.data_folder}' 文件夹后重新运行程序。")
+            self._wait_for_exit()
+            return
+
+        print(f"找到 {len(pdf_files)} 个PDF文件\n")
+
+        # 步骤4-5: 处理文件并收集结果
+        print("开始处理...\n")
+        resume_list = []
+        failed_files = []
+
+        for index, pdf_file in enumerate(pdf_files, start=1):
+            # 显示进度
+            print(f"[{index}/{len(pdf_files)}] 正在处理: {pdf_file.name} ... ", end="")
 
             try:
                 # 提取PDF文本
-                text = pdf_extractor.extract_text(test_file)
-                print(f"✓ 文本提取成功，长度: {len(text)} 字符")
+                text = self.pdf_extractor.extract_text(pdf_file)
 
                 # 提取信息
-                name = info_extractor.extract_name(text)
-                gender = info_extractor.extract_gender(text)
-                age = info_extractor.extract_age(text)
-                date = info_extractor.extract_date(text)
-                phone = info_extractor.extract_phone(text)
-                position = info_extractor.extract_position(text)
-                location = info_extractor.extract_location(text)
-                salary = info_extractor.extract_salary(text)
-                email = info_extractor.extract_email(text)
+                name = self.info_extractor.extract_name(text) or "未识别"
+                gender = self.info_extractor.extract_gender(text) or ""
+                age = self.info_extractor.extract_age(text) or ""
+                date = self.info_extractor.extract_date(text) or ""
+                phone = self.info_extractor.extract_phone(text) or "未找到"
+                position = self.info_extractor.extract_position(text) or ""
+                location = self.info_extractor.extract_location(text) or ""
+                salary = self.info_extractor.extract_salary(text) or ""
+                email = self.info_extractor.extract_email(text) or "未找到"
 
-                print(f"  姓名: {name if name else ''}")
-                print(f"  性别: {gender if gender else ''}")
-                print(f"  年龄: {age if age else ''}")
-                print(f"  时间: {date if date else ''}")
-                print(f"  电话: {phone if phone else ''}")
-                print(f"  岗位: {position if position else ''}")
-                print(f"  地区: {location if location else ''}")
-                print(f"  工资: {salary if salary else ''}")
-                print(f"  邮箱: {email if email else ''}")
-                print(f"  文件名: {test_file.name}")
+                # 创建简历信息对象
+                resume_info = ResumeInfo(
+                    index=index,
+                    name=name,
+                    gender=gender,
+                    age=age,
+                    date=date,
+                    phone=phone,
+                    position=position,
+                    location=location,
+                    salary=salary,
+                    email=email,
+                    filename=pdf_file.name,
+                )
+
+                resume_list.append(resume_info)
+                print("✓")
 
             except PDFExtractionError as e:
-                print(f"✗ 提取失败: {e}")
+                # 记录失败文件
+                failed_files.append((pdf_file.name, str(e)))
+                print("✗")
+            except Exception as e:
+                # 捕获其他未预期的错误
+                failed_files.append((pdf_file.name, f"未知错误: {str(e)}"))
+                print("✗")
+
+        # 步骤6: 导出Excel
+        if resume_list:
+            print("\n正在导出Excel文件...")
+            try:
+                output_path = self.excel_exporter.export(resume_list)
+                print(f"✓ 导出成功")
+            except ExcelExportError as e:
+                print(f"✗ 导出失败: {e}")
+                output_path = None
+        else:
+            print("\n没有成功提取的数据，跳过Excel导出。")
+            output_path = None
+
+        # 步骤7: 显示统计信息
+        self._show_statistics(
+            total=len(pdf_files),
+            success=len(resume_list),
+            failed=len(failed_files),
+            failed_files=failed_files,
+            output_path=output_path,
+        )
+
+        # 步骤8: 等待用户按键退出
+        self._wait_for_exit()
+
+    def _show_welcome(self):
+        """显示启动欢迎界面"""
+        print("=" * 60)
+        print("    简历信息提取工具 v1.0")
+        print("=" * 60)
+        print("使用说明：")
+        print("1. 将PDF简历放入 'datas' 文件夹")
+        print("2. 双击运行本程序")
+        print("3. 等待处理完成，查看生成的Excel文件")
+        print("=" * 60)
+
+    def _show_statistics(
+        self,
+        total: int,
+        success: int,
+        failed: int,
+        failed_files: List[tuple],
+        output_path: Path = None,
+    ):
+        """显示处理完成后的统计信息
+
+        Args:
+            total: 总文件数
+            success: 成功处理数
+            failed: 失败数
+            failed_files: 失败文件列表，每项为(文件名, 错误原因)元组
+            output_path: 输出Excel文件路径
+        """
+        print("\n" + "=" * 60)
+        print("处理完成！")
+        print("=" * 60)
+        print(f"总文件数: {total}")
+        print(f"成功: {success}")
+        print(f"失败: {failed}")
+
+        # 显示失败文件列表
+        if failed_files:
+            print("\n失败文件:")
+            for filename, error in failed_files:
+                print(f"  - {filename} ({error})")
+
+        # 显示输出文件路径
+        if output_path:
+            print(f"\n输出文件: {output_path.absolute()}")
+
+        print("=" * 60)
+
+    def _wait_for_exit(self):
+        """等待用户按键后退出"""
+        input("\n按回车键退出...")
+
+
+# ==================== 主程序入口 ====================
+
+if __name__ == "__main__":
+    # 创建应用实例并运行
+    app = ResumeExtractorApp()
+    app.run()
