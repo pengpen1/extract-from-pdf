@@ -1213,6 +1213,25 @@ class ResumeExtractorApp:
 # ==================== 主程序入口 ====================
 
 if __name__ == "__main__":
-    # 创建应用实例并运行
-    app = ResumeExtractorApp()
-    app.run()
+    try:
+        # 创建应用实例并运行
+        app = ResumeExtractorApp()
+        app.run()
+    except KeyboardInterrupt:
+        # 用户中断程序（Ctrl+C）
+        print("\n\n程序已被用户中断。")
+        input("\n按回车键退出...")
+    except Exception as e:
+        # 捕获所有未处理的致命错误
+        print("\n" + "=" * 60)
+        print("程序运行出错！")
+        print("=" * 60)
+        print(f"错误类型: {type(e).__name__}")
+        print(f"错误信息: {str(e)}")
+        print("\n请检查以下可能的原因：")
+        print("1. 确保 'datas' 文件夹存在且有读取权限")
+        print("2. 确保有足够的磁盘空间")
+        print("3. 确保PDF文件未被其他程序占用")
+        print("4. 如果问题持续，请联系技术支持")
+        print("=" * 60)
+        input("\n按回车键退出...")
