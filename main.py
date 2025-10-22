@@ -232,13 +232,67 @@ class InfoExtractor:
             "应聘岗位",
             "期望职位",
             "个人资料",
+            "前端工程师",
+            "后端工程师",
+            "前端开发",
+            "后端开发",
+            "全栈工程师",
+            "开发工程师",
         }
+
+    def parse_filename(self, filename: str) -> dict:
+        """从文件名中解析信息
+
+        文件名格式示例：【前端开发工程师_成都 8-12K】李志华 5年.pdf
+
+        Args:
+            filename: 文件名
+
+        Returns:
+            包含解析信息的字典
+        """
+        info = {
+            "name": None,
+            "position": None,
+            "location": None,
+            "salary": None,
+        }
+
+        # 移除.pdf扩展名和常见后缀
+        name_without_ext = filename.replace(".pdf", "").replace(".PDF", "")
+        name_without_ext = self.re.sub(r"的简历$", "", name_without_ext)  # 移除"的简历"
+
+        # 模式1: 【岗位_地区 薪资】姓名 年限
+        pattern1 = r"【([^_]+)_([^\s]+)\s+([^】]+)】\s*([^\s]+)"
+        match = self.re.search(pattern1, name_without_ext)
+        if match:
+            info["position"] = match.group(1).strip()
+            info["location"] = match.group(2).strip()
+            info["salary"] = match.group(3).strip()
+            info["name"] = match.group(4).strip()
+            return info
+
+        # 模式2: 姓名在文件名中（简单模式）
+        # 尝试提取2-4个连续中文字符作为姓名
+        chinese_pattern = r"[\u4e00-\u9fff]{2,4}"
+        matches = self.re.findall(chinese_pattern, name_without_ext)
+        if matches:
+            # 取第一个有效的姓名
+            for match in matches:
+                if self._is_valid_name(match):
+                    info["name"] = match
+                    break
+
+        return info
 
     def extract_phone(self, text: str) -> Optional[str]:
         """提取手机号码
 
-        使用正则表达式匹配中国大陆11位手机号码格式（1开头的11位数字）。
-        当存在多个手机号时，返回第一个匹配的结果。
+        支持多种格式：
+        - 标准格式：13812345678
+        - 带括号：(+86) 138-1234-5678
+        - 带横线：138-1234-5678
+        - 带空格：138 1234 5678
 
         Args:
             text: 简历文本
@@ -249,12 +303,20 @@ class InfoExtractor:
         if not text:
             return None
 
-        # 正则表达式: 匹配1开头，第二位是3-9，后面9位数字
-        # 使用\b确保是完整的11位数字，不是更长数字的一部分
+        # 先尝试提取所有可能包含手机号的文本段
+        # 查找包含1开头数字的所有片段
+        potential_phones = self.re.findall(r"[\(\+\d\s\-]{11,20}", text)
+
+        for segment in potential_phones:
+            # 提取纯数字
+            digits = self.re.sub(r"[^\d]", "", segment)
+            # 验证是否为11位手机号
+            if len(digits) == 11 and digits[0] == "1" and digits[1] in "3456789":
+                return digits
+
+        # 如果上面没找到，使用标准模式
         pattern = r"\b1[3-9]\d{9}\b"
-
         match = self.re.search(pattern, text)
-
         if match:
             return match.group(0)
 
@@ -276,16 +338,18 @@ class InfoExtractor:
             return None
 
         # 正则表达式: 匹配标准邮箱格式
-        # 用户名部分: 字母、数字、点、下划线、百分号、加号、减号
+        # 用户名部分: 字母、数字、点、下划线、百分号、加号、减号（至少3个字符）
         # @符号
         # 域名部分: 字母、数字、点、减号
         # 顶级域名: 至少2个字母
-        pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+        pattern = r"[a-zA-Z0-9][a-zA-Z0-9._%+-]{2,}@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
 
-        match = self.re.search(pattern, text)
+        # 查找所有匹配
+        matches = self.re.findall(pattern, text)
 
-        if match:
-            return match.group(0)
+        # 返回最长的邮箱（避免截断问题）
+        if matches:
+            return max(matches, key=len)
 
         return None
 
@@ -350,7 +414,8 @@ class InfoExtractor:
     def _extract_name_by_position(self, text: str) -> Optional[str]:
         """通过位置启发式策略提取姓名
 
-        在简历前200字符中查找2-4个连续中文字符作为候选姓名
+        在简历前100字符中查找2-4个连续中文字符作为候选姓名
+        优先查找第一行或前几行的独立中文词
 
         Args:
             text: 简历文本
@@ -358,13 +423,25 @@ class InfoExtractor:
         Returns:
             提取的姓名，未找到时返回None
         """
-        # 只在前200字符中查找
-        search_text = text[:200]
+        # 只在前100字符中查找（缩小范围，提高准确性）
+        search_text = text[:100]
 
-        # 查找2-4个连续中文字符
-        # \u4e00-\u9fff 是中文字符的Unicode范围
+        # 按行分割
+        lines = search_text.split("\n")
+
+        # 优先检查前3行
+        for line in lines[:3]:
+            line = line.strip()
+            # 查找2-4个连续中文字符
+            pattern = r"^[\u4e00-\u9fff]{2,4}$"
+            match = self.re.match(pattern, line)
+            if match:
+                candidate = match.group(0)
+                if self._is_valid_name(candidate):
+                    return candidate
+
+        # 如果前3行没找到，在整个搜索文本中查找
         pattern = r"[\u4e00-\u9fff]{2,4}"
-
         matches = self.re.findall(pattern, search_text)
 
         # 遍历所有匹配，找到第一个有效的姓名
@@ -418,6 +495,7 @@ class InfoExtractor:
         """提取性别
 
         搜索"性别："、"性 别："等关键词后的内容
+        也尝试从其他线索推断（如"先生"、"女士"等）
 
         Args:
             text: 简历文本
@@ -432,6 +510,7 @@ class InfoExtractor:
         patterns = [
             r"性\s*别\s*[：:]\s*(男|女)",
             r"Gender\s*[：:]\s*(男|女|Male|Female|male|female)",
+            r"[：:]\s*(男|女)\s*[|/\n]",  # 匹配 "：男 |" 这种格式
         ]
 
         for pattern in patterns:
@@ -443,6 +522,13 @@ class InfoExtractor:
                     return "男"
                 elif gender.lower() in ["female", "女"]:
                     return "女"
+
+        # 尝试从称呼推断（在前200字符中）
+        search_text = text[:200]
+        if "先生" in search_text or "Mr" in search_text:
+            return "男"
+        elif "女士" in search_text or "Ms" in search_text or "Miss" in search_text:
+            return "女"
 
         return None
 
@@ -558,6 +644,7 @@ class InfoExtractor:
 
         搜索"工作地点："、"期望城市："等关键词后的内容
         或从"求职意向"中提取城市部分
+        只返回识别的城市名，避免返回过多无关内容
 
         Args:
             text: 简历文本
@@ -570,20 +657,19 @@ class InfoExtractor:
 
         # 定义关键词模式列表
         patterns = [
-            r"工作地点\s*[：:]\s*([^\n]{2,20})",
-            r"期望城市\s*[：:]\s*([^\n]{2,20})",
-            r"期望地点\s*[：:]\s*([^\n]{2,20})",
-            r"所在地\s*[：:]\s*([^\n]{2,20})",
-            r"Location\s*[：:]\s*([^\n]{2,20})",
+            r"期望城市\s*[：:]\s*([^\n|]+)",
+            r"工作地点\s*[：:]\s*([^\n|]+)",
+            r"期望地点\s*[：:]\s*([^\n|]+)",
         ]
 
         for pattern in patterns:
             match = self.re.search(pattern, text, self.re.IGNORECASE)
             if match:
-                location = match.group(1).strip()
-                # 清理可能的多余空白和换行
-                location = self.re.sub(r"\s+", " ", location)
-                return location
+                location_text = match.group(1).strip()
+                # 从文本中提取城市名
+                city = self._extract_city_from_text(location_text)
+                if city:
+                    return city
 
         # 如果没有找到，尝试从"求职意向"中提取城市
         intention_pattern = r"求职意向\s*[：:]\s*([^\n]+)"
@@ -602,6 +688,74 @@ class InfoExtractor:
                     # 验证是否为城市名
                     if location and self._is_city_name(location):
                         return location
+
+        return None
+
+    def _extract_city_from_text(self, text: str) -> Optional[str]:
+        """从文本中提取城市名
+
+        Args:
+            text: 包含城市信息的文本
+
+        Returns:
+            城市名，未找到时返回None
+        """
+        # 常见城市名列表
+        cities = {
+            "北京",
+            "上海",
+            "广州",
+            "深圳",
+            "成都",
+            "重庆",
+            "杭州",
+            "武汉",
+            "西安",
+            "天津",
+            "南京",
+            "苏州",
+            "长沙",
+            "郑州",
+            "沈阳",
+            "青岛",
+            "宁波",
+            "东莞",
+            "无锡",
+            "佛山",
+            "合肥",
+            "昆明",
+            "福州",
+            "厦门",
+            "哈尔滨",
+            "济南",
+            "温州",
+            "长春",
+            "石家庄",
+            "常州",
+            "泉州",
+            "南宁",
+            "贵阳",
+            "南昌",
+            "南通",
+            "金华",
+            "徐州",
+            "太原",
+            "嘉兴",
+            "烟台",
+            "惠州",
+            "保定",
+            "台州",
+            "中山",
+            "绍兴",
+            "乌鲁木齐",
+            "潍坊",
+            "兰州",
+        }
+
+        # 在文本中查找城市名
+        for city in cities:
+            if city in text:
+                return city
 
         return None
 
@@ -672,6 +826,7 @@ class InfoExtractor:
         """提取期望薪资
 
         搜索"期望薪资："、"薪资要求："等关键词后的内容
+        只提取薪资数字部分，避免包含其他无关信息
 
         Args:
             text: 简历文本
@@ -684,18 +839,49 @@ class InfoExtractor:
 
         # 定义关键词模式列表
         patterns = [
-            r"期望薪资\s*[：:]\s*([^\n]{2,30})",
-            r"薪资要求\s*[：:]\s*([^\n]{2,30})",
-            r"期望工资\s*[：:]\s*([^\n]{2,30})",
-            r"Salary\s*[：:]\s*([^\n]{2,30})",
+            r"期望薪资\s*[：:]\s*([^\n|]+)",
+            r"薪资要求\s*[：:]\s*([^\n|]+)",
+            r"期望工资\s*[：:]\s*([^\n|]+)",
         ]
 
         for pattern in patterns:
             match = self.re.search(pattern, text, self.re.IGNORECASE)
             if match:
-                salary = match.group(1).strip()
-                # 清理可能的多余空白和换行
-                salary = self.re.sub(r"\s+", " ", salary)
+                salary_text = match.group(1).strip()
+                # 提取薪资格式：数字-数字K 或 数字k~数字k
+                salary = self._extract_salary_from_text(salary_text)
+                if salary:
+                    return salary
+
+        return None
+
+    def _extract_salary_from_text(self, text: str) -> Optional[str]:
+        """从文本中提取薪资数字
+
+        支持格式：
+        - 8-12K
+        - 8k~12k
+        - 8000-12000
+
+        Args:
+            text: 包含薪资信息的文本
+
+        Returns:
+            薪资字符串，未找到时返回None
+        """
+        # 匹配薪资格式
+        patterns = [
+            r"(\d+[-~]\d+[kK])",  # 8-12K 或 8~12k
+            r"(\d+[kK][-~]\d+[kK])",  # 8k-12k
+            r"(\d+[-~]\d+)",  # 8000-12000
+        ]
+
+        for pattern in patterns:
+            match = self.re.search(pattern, text)
+            if match:
+                salary = match.group(1)
+                # 统一格式，转换为大写K
+                salary = salary.replace("k", "K")
                 return salary
 
         return None
@@ -890,16 +1076,35 @@ class ResumeExtractorApp:
                 # 提取PDF文本
                 text = self.pdf_extractor.extract_text(pdf_file)
 
-                # 提取信息
-                name = self.info_extractor.extract_name(text) or "未识别"
+                # 从文件名中解析信息（作为补充）
+                filename_info = self.info_extractor.parse_filename(pdf_file.name)
+
+                # 提取信息（优先使用PDF内容，文件名作为补充）
+                name = (
+                    self.info_extractor.extract_name(text)
+                    or filename_info.get("name")
+                    or ""
+                )
                 gender = self.info_extractor.extract_gender(text) or ""
                 age = self.info_extractor.extract_age(text) or ""
                 date = self.info_extractor.extract_date(text) or ""
-                phone = self.info_extractor.extract_phone(text) or "未找到"
-                position = self.info_extractor.extract_position(text) or ""
-                location = self.info_extractor.extract_location(text) or ""
-                salary = self.info_extractor.extract_salary(text) or ""
-                email = self.info_extractor.extract_email(text) or "未找到"
+                phone = self.info_extractor.extract_phone(text) or ""
+                position = (
+                    self.info_extractor.extract_position(text)
+                    or filename_info.get("position")
+                    or ""
+                )
+                location = (
+                    self.info_extractor.extract_location(text)
+                    or filename_info.get("location")
+                    or ""
+                )
+                salary = (
+                    self.info_extractor.extract_salary(text)
+                    or filename_info.get("salary")
+                    or ""
+                )
+                email = self.info_extractor.extract_email(text) or ""
 
                 # 创建简历信息对象
                 resume_info = ResumeInfo(
