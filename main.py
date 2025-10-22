@@ -208,6 +208,25 @@ class InfoExtractor:
 
         self.re = re
 
+        # 常见标题词，用于过滤非姓名文本
+        self.common_title_words = {
+            "个人简历",
+            "求职简历",
+            "简历",
+            "个人信息",
+            "基本信息",
+            "求职意向",
+            "工作经历",
+            "教育经历",
+            "项目经验",
+            "自我评价",
+            "技能特长",
+            "联系方式",
+            "应聘岗位",
+            "期望职位",
+            "个人资料",
+        }
+
     def extract_phone(self, text: str) -> Optional[str]:
         """提取手机号码
 
@@ -263,6 +282,131 @@ class InfoExtractor:
 
         return None
 
+    def extract_name(self, text: str) -> Optional[str]:
+        """提取姓名
+
+        使用多策略组合方法提取姓名：
+        1. 关键词模式匹配（优先）
+        2. 位置启发式策略（回退）
+
+        Args:
+            text: 简历文本
+
+        Returns:
+            姓名字符串，未找到时返回None
+        """
+        if not text:
+            return None
+
+        # 策略1: 关键词模式匹配
+        name = self._extract_name_by_keyword(text)
+        if name:
+            return name
+
+        # 策略2: 位置启发式策略
+        name = self._extract_name_by_position(text)
+        if name:
+            return name
+
+        return None
+
+    def _extract_name_by_keyword(self, text: str) -> Optional[str]:
+        """通过关键词模式提取姓名
+
+        搜索"姓名："、"姓 名："、"Name:"等关键词后的内容
+
+        Args:
+            text: 简历文本
+
+        Returns:
+            提取的姓名，未找到时返回None
+        """
+        # 定义关键词模式列表
+        keyword_patterns = [
+            r"姓\s*名\s*[：:]\s*([^\s\n]{2,4})",  # 姓名：、姓 名：
+            r"姓\s*名\s*[：:]\s*([^\s\n]{2,4})",  # 姓名:（英文冒号）
+            r"Name\s*[：:]\s*([^\s\n]{2,4})",  # Name:、Name：
+            r"name\s*[：:]\s*([^\s\n]{2,4})",  # name:、name：
+            r"名\s*字\s*[：:]\s*([^\s\n]{2,4})",  # 名字：
+        ]
+
+        for pattern in keyword_patterns:
+            match = self.re.search(pattern, text, self.re.IGNORECASE)
+            if match:
+                candidate = match.group(1).strip()
+                # 验证候选姓名
+                if self._is_valid_name(candidate):
+                    return candidate
+
+        return None
+
+    def _extract_name_by_position(self, text: str) -> Optional[str]:
+        """通过位置启发式策略提取姓名
+
+        在简历前200字符中查找2-4个连续中文字符作为候选姓名
+
+        Args:
+            text: 简历文本
+
+        Returns:
+            提取的姓名，未找到时返回None
+        """
+        # 只在前200字符中查找
+        search_text = text[:200]
+
+        # 查找2-4个连续中文字符
+        # \u4e00-\u9fff 是中文字符的Unicode范围
+        pattern = r"[\u4e00-\u9fff]{2,4}"
+
+        matches = self.re.findall(pattern, search_text)
+
+        # 遍历所有匹配，找到第一个有效的姓名
+        for candidate in matches:
+            if self._is_valid_name(candidate):
+                return candidate
+
+        return None
+
+    def _is_valid_name(self, candidate: str) -> bool:
+        """验证候选文本是否为有效姓名
+
+        过滤规则：
+        - 排除常见标题词
+        - 排除包含数字的文本
+        - 排除包含特殊符号的文本
+        - 长度必须在2-4个字符之间
+
+        Args:
+            candidate: 候选姓名文本
+
+        Returns:
+            True表示有效姓名，False表示无效
+        """
+        if not candidate:
+            return False
+
+        # 去除首尾空白
+        candidate = candidate.strip()
+
+        # 检查长度（中文姓名通常2-4个字）
+        if len(candidate) < 2 or len(candidate) > 4:
+            return False
+
+        # 排除常见标题词
+        if candidate in self.common_title_words:
+            return False
+
+        # 排除包含数字的文本
+        if self.re.search(r"\d", candidate):
+            return False
+
+        # 排除包含特殊符号的文本（允许中文字符）
+        # 只允许纯中文字符
+        if not self.re.match(r"^[\u4e00-\u9fff]+$", candidate):
+            return False
+
+        return True
+
 
 # ==================== 主程序入口 ====================
 
@@ -299,9 +443,11 @@ if __name__ == "__main__":
                 print(f"✓ 文本提取成功，长度: {len(text)} 字符")
 
                 # 提取信息
+                name = info_extractor.extract_name(text)
                 phone = info_extractor.extract_phone(text)
                 email = info_extractor.extract_email(text)
 
+                print(f"  姓名: {name if name else '未识别'}")
                 print(f"  手机号: {phone if phone else '未找到'}")
                 print(f"  邮箱: {email if email else '未找到'}")
 
