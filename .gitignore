@@ -1,0 +1,40 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# ---- Virtual environment ----
+.venv/
+env/
+venv/
+ENV/
+.venv*/   # 忽略所有虚拟环境目录
+
+# ---- VSCode & IDE ----
+.vscode/
+.idea/
+*.code-workspace
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+
+# ---- Project-specific ----
+# 保留目录但不保留文件
+datas/*
+!datas/.gitkeep
+
+# ---- Build / Packaging ----
+build/
+dist/
+*.egg-info/
+*.spec  # pyinstaller 生成的文件
+
+# ---- Logs & Temp ----
+*.log
+*.tmp
+*.bak
+
+# ---- Excel output ----
+*.xlsx
